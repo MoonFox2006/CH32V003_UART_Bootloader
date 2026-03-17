@@ -27,17 +27,38 @@ typedef struct __attribute__((packed)) _iap_t {
 HANDLE hCom = INVALID_HANDLE_VALUE;
 FILE *firmware = NULL;
 
-static void comDone();
+static BOOL comOpen(const char *name) {
+    const char PROGRESS[] = { '-', '\\', '|', '/' };
+
+    char fullname[strlen(name) + 5];
+    uint8_t progress = 0;
+
+    strcpy(fullname, "\\\\.\\");
+    strcat(fullname, name);
+    for (int i = 0; i < 15 * 20; ++i) { // 15 sec.
+        hCom = CreateFile(fullname, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+        if (hCom != INVALID_HANDLE_VALUE)
+            return TRUE;
+        printf("%c\b", PROGRESS[progress]);
+        if (++progress >= sizeof(PROGRESS) / sizeof(PROGRESS[0]))
+            progress = 0;
+        Sleep(50); // 0.05 sec.
+    }
+    return FALSE;
+}
+
+static void comDone() {
+    if (hCom != INVALID_HANDLE_VALUE) {
+        CloseHandle(hCom);
+        hCom = INVALID_HANDLE_VALUE;
+    }
+}
 
 static BOOL comInit(const char *name, uint32_t baudrate) {
     DCB dcb;
     COMMTIMEOUTS cto;
-    char fullname[strlen(name) + 5];
 
-    strcpy(fullname, "\\\\.\\");
-    strcat(fullname, name);
-    hCom = CreateFile(fullname, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (hCom == INVALID_HANDLE_VALUE)
+    if (! comOpen(name))
         return FALSE;
     dcb.DCBlength = sizeof(DCB);
     if (! GetCommState(hCom, &dcb)) {
@@ -62,13 +83,6 @@ static BOOL comInit(const char *name, uint32_t baudrate) {
         return FALSE;
     }
     return TRUE;
-}
-
-static void comDone() {
-    if (hCom != INVALID_HANDLE_VALUE) {
-        CloseHandle(hCom);
-        hCom = INVALID_HANDLE_VALUE;
-    }
 }
 
 static int16_t comRead() {
@@ -208,10 +222,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    printf("Open COM port \"%s\"... ", argv[1]);
     if (! comInit(argv[1], 115200)) {
-        printf("Error open COM port \"%s\"!\n", argv[1]);
+        printf("ERROR!\n", argv[1]);
         return 1;
-    }
+    } else
+        printf("OK\n");
 
     if (! (firmware = fopen(argv[2], "rb"))) {
         comDone();
